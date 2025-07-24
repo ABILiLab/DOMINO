@@ -1,0 +1,340 @@
+import os
+import numpy as np
+import pandas as pd
+import scanpy as sc
+import scipy.sparse as sp
+from scipy.sparse import csc_matrix
+from scipy.sparse import csr_matrix
+from sklearn.neighbors import NearestNeighbors 
+from scipy import sparse
+from scipy.sparse import eye, diags
+from scipy.sparse import lil_matrix, coo_matrix
+
+
+def permutation(feature):
+    '''Randomly shuffles the rows of input feature matrix.'''
+    ids = np.arange(feature.shape[0])
+    # Randomly shuffle the indices.
+    ids = np.random.permutation(ids)
+    feature_permutated = feature[ids]
+    
+    return feature_permutated 
+    
+def _arnoldi_iteration(T, alpha, max_iter, tol):
+    """Arnoldi iteration method for accelerating convergence."""
+    N = T.shape[0]
+    S = alpha * sp.eye(N, dtype=np.float32, format='csr')
+    X = (1 - alpha) * T
+    
+    for _ in range(max_iter):
+        delta = alpha * X
+        S += delta
+        
+        # Check for convergence.
+        if delta.nnz == 0 or np.abs(delta).sum() < tol * N:
+            break
+            
+        # Optimize using matrix-vector product.
+        X = T @ X  
+        
+    return S
+
+def optimized_balanced_gdc(A, alpha=0.15, eps=1e-6, n_iter=35, tol=1e-5):
+    """optimized balance of PPR diffusion."""
+    N = A.shape[0]
+    
+    # Convert to CSR format to achieve the best matrix multiplication performance.
+    if not isinstance(A, csr_matrix):
+        A = csr_matrix(A)
+    
+    # Add self-loops and normalize.
+    A_loop = A + eye(N, dtype=np.float32, format='csr')
+    D_loop_vec = A_loop.sum(axis=1).A.ravel().astype(np.float32)
+    D_loop_invsqrt = diags(1 / np.sqrt(D_loop_vec + 1e-12), dtype=np.float32, format='csr')
+    T_sym = D_loop_invsqrt @ A_loop @ D_loop_invsqrt
+
+    # Perform Arnoldi iteration.
+    S = _arnoldi_iteration(T_sym, alpha, n_iter, tol)
+    
+    # Efficient sparsification and normalization.
+    S.data[S.data < eps] = 0
+    S.eliminate_zeros()
+    
+    # Use a more stable normalization method.
+    D_tilde_vec = S.sum(axis=1).A.ravel()
+    D_tilde_inv = diags(1 / np.maximum(D_tilde_vec, 1e-12), dtype=np.float32, format='csr')
+    return S @ D_tilde_inv
+
+def build_sparse_adjacency(position, n_neighbors=5):
+    """Efficient construction of sparse adjacency matrix."""
+    n_spot = position.shape[0]
+    
+    # Using BallTree to find neighbors.
+    nn = NearestNeighbors(n_neighbors=n_neighbors+1, algorithm='ball_tree')
+    nn.fit(position)
+    distances, indices = nn.kneighbors(position)
+    
+    # Construct the original neighbor matrix (asymmetric).
+    rows = np.repeat(np.arange(n_spot), n_neighbors)
+    cols = indices[:, 1:].flatten()  
+    data = np.ones_like(rows, dtype=np.int8)
+    
+    # Create the original neighbor matrix (in COO format).
+    adj_original = coo_matrix((data, (rows, cols)), shape=(n_spot, n_spot))
+    adj_original = adj_original.tocsr()  
+    
+    # Obtain the symmetric adjacency matrix by adding the transpose.
+    adj_sym = adj_original + adj_original.T
+    adj_sym.data = np.ones_like(adj_sym.data)  
+    
+    return adj_sym, adj_original
+
+def optimized_construct_interaction(adata, n_neighbors=5, alpha=0.15, eps=1e-6, n_iter='auto', tol=1e-5):
+    """Optimized function for constructing spatial interaction graphs with diffusion processing."""
+    position = adata.obsm['spatial']
+    n_spot = position.shape[0]
+    
+    # Automatically determine iteration count based on number of spots.
+    if n_iter == 'auto':
+        n_iter = 40 if n_spot < 2000 else 30 if n_spot < 5000 else 25
+    
+    # Build sparse adjacency matrix from spatial coordinates.
+    adj, interaction = build_sparse_adjacency(position, n_neighbors=n_neighbors)
+
+    # Original neighbor matrix
+    adata.obsm['graph_neigh'] = interaction
+    # Symmetric adjacency matrix
+    adata.obsm['adj'] = adj
+
+    # Graph diffusion processing.
+    graph_diffusion = optimized_balanced_gdc(
+        adj, 
+        alpha=alpha,
+        eps=eps,
+        n_iter=n_iter,
+        tol=tol
+    )
+    # Neighbor matrix after diffusion processing.
+    adata.obsm['graph_diffusion'] = graph_diffusion
+
+    # Symmetric adjacency matrix after diffusion processing.
+    adj_diffusion = 0.5 * (graph_diffusion + graph_diffusion.T)
+    adj_diffusion.data = (adj_diffusion.data > 0).astype(np.int8)
+    adata.obsm['adj_diffusion'] = adj_diffusion
+    
+    return adata
+
+def preprocess(adata):
+    sc.pp.highly_variable_genes(adata, flavor="seurat_v3", n_top_genes=3000)
+    adata = adata[:, adata.var['highly_variable']].copy()
+    sc.pp.normalize_total(adata, target_sum=1e4)
+    sc.pp.log1p(adata)
+    sc.pp.scale(adata, zero_center=False, max_value=10)
+    
+    return adata
+
+def grid_downsample(
+    adata, 
+    grid_size=(100, 100), 
+    downsample_by='random',  
+    keep_sparse=True         
+):
+    """
+    Parameters
+    ----------
+    adata : 
+        AnnData object of spatial data.
+    grid_size : 
+        Grid division size (x_bins, y_bins).
+    downsample_by : 
+        Sampling method ('random'/'median').
+    keep_sparse : 
+        Maintain the sparse matrix format or not.
+        
+    Returns
+    -------
+    AnnData object after downsampling.
+    
+    """
+    coords = adata.obsm['spatial']
+    min_x, min_y = coords.min(axis=0)
+    max_x, max_y = coords.max(axis=0)
+    
+    # Generate grid boundaries.
+    eps_x, eps_y = (max_x-min_x)*1e-5, (max_y-min_y)*1e-5
+    x_bins = np.linspace(min_x, max_x+eps_x, grid_size[0]+1)
+    y_bins = np.linspace(min_y, max_y+eps_y, grid_size[1]+1)
+    
+    # Calculate grid coordinates (vectorization).
+    x_idx = np.digitize(coords[:,0], x_bins) - 1
+    y_idx = np.digitize(coords[:,1], y_bins) - 1
+    grid_ids = x_idx * grid_size[1] + y_idx
+    
+    # Group processing.
+    unique_ids = pd.unique(grid_ids)
+    sampled_indices = []
+    grid_assignments = np.full(len(coords), -1, dtype=int)
+    
+    for i, cell_id in enumerate(unique_ids):
+        cell_mask = (grid_ids == cell_id)
+        cell_indices = np.where(cell_mask)[0]
+        
+        if len(cell_indices) == 0:
+            continue
+            
+        # Select representative points based on the sampling strategy.
+        if downsample_by == 'random':
+            selected_idx = np.random.choice(cell_indices)
+        elif downsample_by == 'median':
+            # Calculate the median coordinates of all points within the grid.
+            median_coord = np.median(coords[cell_indices], axis=0)
+            # Select the point that is closest to the median distance.
+            distances = np.linalg.norm(coords[cell_indices] - median_coord, axis=1)
+            selected_idx = cell_indices[np.argmin(distances)]
+        else:
+            raise ValueError("downsample_by must be 'random' or 'median'")
+            
+        sampled_indices.append(selected_idx)
+        grid_assignments[cell_mask] = i
+    
+    # Constructing downsampled data.
+    adata_downsampled = adata[sampled_indices].copy()
+    
+    # Processing matrix format.
+    if keep_sparse and sparse.issparse(adata.X):
+        adata_downsampled.X = adata.X[sampled_indices].tocsr()
+    
+    # Preserve the original spatial coordinates and grid assignments.
+    adata_downsampled.obs['grid_id'] = grid_ids[sampled_indices]
+    adata_downsampled.uns['grid_assignments'] = grid_assignments
+    adata_downsampled.obsm['spatial'] = coords[sampled_indices]
+    
+    return adata_downsampled
+
+
+def process_10x_slices(data_directory):
+    '''Concurrently process multiple slice data from the 10x Genomics platform.'''
+    slices = os.listdir(data_directory)
+    adata_list = []
+
+    for slice in slices:
+        slice_path = os.path.join(data_directory, slice)   
+        if os.path.isdir(slice_path) :
+            adata = sc.read_visium(slice_path, count_file='filtered_feature_bc_matrix.h5', load_images=True)
+            adata.var_names_make_unique()
+
+            adata = preprocess(adata)
+            adata.obs['slice_id'] = slice
+            df_meta = pd.read_csv(slice_path + '/metadata.tsv', sep='\t')
+            df_meta_layer = df_meta['layer_guess']
+            adata.obs['ground_truth'] = df_meta_layer.values
+
+            adata = adata[~pd.isnull(adata.obs['ground_truth'])]
+            adata_list.append(adata)
+
+    return adata_list
+
+def process_new_data(data_directory): 
+    '''Concurrently process multiple slice data from other platforms (such as CosMx or MERFISH).'''
+    slices = os.listdir(data_directory)
+    adata_list = []
+
+    for slice in slices:
+        if slice.endswith('.h5ad'):
+            slice_path = os.path.join(data_directory, slice)
+            
+            adata = sc.read_h5ad(slice_path)
+            adata.var_names_make_unique()
+
+            slice_name = os.path.splitext(slice)[0]
+            adata.obs['slice'] = slice_name            
+            sc.pp.normalize_total(adata, target_sum=1e4)
+            sc.pp.log1p(adata)
+            sc.pp.scale(adata, zero_center=False, max_value=10)
+
+            df_meta_layer = adata.obs['region']
+            adata.obs['ground_truth'] = df_meta_layer.values
+
+            adata = adata[~pd.isnull(adata.obs['ground_truth'])]
+
+            adata_list.append(adata)
+            print(f"Successfully read the file: {slice}")
+
+    return adata_list
+
+def process_data(platform, dataset_name, slice):
+    '''Process single slice data from the 10x Genomics platform or other platforms (such as CosMx or MERFISH).'''
+    # The slice data is from the 10x Genomics platform.
+    if platform == '10x':
+        input_dir = './data/{}/'.format(dataset_name) + slice
+        adata = sc.read_visium(input_dir, count_file='filtered_feature_bc_matrix.h5', load_images=True)
+        adata.var_names_make_unique()
+        adata = preprocess(adata)
+
+        df_meta = pd.read_csv(input_dir + '/metadata.tsv', sep='\t')
+        df_meta_layer = df_meta['layer_guess']
+        adata.obs['ground_truth'] = df_meta_layer.values
+
+        adata = adata[~pd.isnull(adata.obs['ground_truth'])]
+
+        n_clusters = len(adata.obs['ground_truth'].unique())
+        print(f"Number of ground truth clusters (10x platform): {n_clusters}")
+
+    # The sliced data comes from other platforms (such as CosMx or MERFISH).
+    else:
+        input_dir = './data/{}/'.format(dataset_name) + '{}.h5ad'.format(slice)
+        adata = sc.read_h5ad(input_dir)
+        adata.var_names_make_unique()
+         
+        sc.pp.normalize_total(adata, target_sum=1e4)
+        sc.pp.log1p(adata)
+        sc.pp.scale(adata, zero_center=False, max_value=10)
+
+        df_meta_layer = adata.obs['region']
+        adata.obs['ground_truth'] = df_meta_layer.values
+
+        adata = adata[~pd.isnull(adata.obs['ground_truth'])]
+
+        n_clusters = len(adata.obs['ground_truth'].unique())
+        print(f"Number of ground truth clusters (other platform): {n_clusters}")
+
+    return adata, n_clusters
+
+def get_feature(adata):
+    '''Extracts and processes feature matrix from AnnData object.'''
+    adata_Vars = adata
+       
+    if isinstance(adata_Vars.X, csc_matrix) or isinstance(adata_Vars.X, csr_matrix):
+       feat = adata_Vars.X.toarray()[:, ]
+    else:
+       feat = adata_Vars.X[:, ] 
+    
+    # Data augmentation by randomly shuffling the features.
+    feat_a = permutation(feat)
+    
+    adata.obsm['feat'] = feat
+    adata.obsm['feat_a'] = feat_a    
+    
+def add_contrastive_label(adata):
+    '''Adds contrastive label to AnnData object.'''
+    n_spot = adata.n_obs
+    one_matrix = np.ones([n_spot, 1])
+    zero_matrix = np.zeros([n_spot, 1])
+    label_CSL = np.concatenate([one_matrix, zero_matrix], axis=1)
+    adata.obsm['label_CSL'] = label_CSL
+    
+def normalize_adj(adj):
+    """Symmetrically normalize adjacency matrix."""
+    adj = sp.coo_matrix(adj)
+    rowsum = np.array(adj.sum(1))
+    d_inv_sqrt = np.power(rowsum, -0.5).flatten()
+    d_inv_sqrt[np.isinf(d_inv_sqrt)] = 0.
+    d_mat_inv_sqrt = sp.diags(d_inv_sqrt)
+    adj = adj.dot(d_mat_inv_sqrt).transpose().dot(d_mat_inv_sqrt)
+    return adj.toarray()
+
+def preprocess_adj(adj):
+    """Preprocessing of adjacency matrix for simple GCN model and conversion to tuple representation."""
+    adj_normalized = normalize_adj(adj)+np.eye(adj.shape[0])
+    return adj_normalized 
+
