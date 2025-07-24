@@ -4,6 +4,11 @@
 
 This code was tested with python 3.8, cuda 11.6, PyTorch 1.13.1, and torch_geometrics 2.5.3
 
+First, install the conda environment with Python 3.8：
+```
+conda create -n env_name python=3.8
+```
+Replace 'env_name' with your own environment name.
 
 Install packages listed on a pip file:
 ```
