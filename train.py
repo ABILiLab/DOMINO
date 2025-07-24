@@ -135,7 +135,7 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     start_time = time.time()
-    device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     slice_id = args.slice_id
 
