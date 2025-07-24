@@ -10,6 +10,11 @@ conda create -n env_name python=3.8
 ```
 Replace 'env_name' with your own environment name.
 
+Then, activate your conda environment:
+```
+conda activate env_name
+```
+
 Install packages listed on a pip file:
 ```
 pip install -r requirement.txt
@@ -29,16 +34,19 @@ conda install -c r rpy2
 
 Configure the relevant environment variables:
 ```
-export R_HOME=/home/<user_name>/anaconda3/envs/<environment_name>/lib/R
-export R_LIBS_USER=/home/<user_name>/anaconda3/envs/<environment_name>/lib/R/library
+export R_HOME=/<path_to_your_conda>/envs/<environment_name>/lib/R
+export R_LIBS_USER=/<path_to_your_conda>/envs/<environment_name>/lib/R/library
 ```
-
-Replace `<user_name>` and `<environment_name>` with your own username and environment name.
+Replace `<path_to_your_conda>` and `<environment_name>` with your own conda path and environment name.
+For example, the follow is my R_HOME path:
+```
+/home/jiapan/.conda/envs/DOMINOR/lib/R
+```
 
 Install `mclust` package in R:
 ```
 R
-install.packages(“mclust”)
+install.packages("mclust")
 ```
 
 ## Datasets
