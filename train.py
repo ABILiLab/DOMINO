@@ -185,7 +185,7 @@ if __name__ == '__main__':
 
     elapsed_time = time.time() - start_time
     # Output computing time 
-    print(f"computing time for slice {slice_id}: {elapsed_time:.4f} 秒")
+    print(f"computing time for slice {slice_id}: {elapsed_time:.4f} seconds")
 
     # Add the results to the table
     results.append({
