@@ -43,10 +43,9 @@ For example, the follow is my R_HOME path:
 /home/jiapan/.conda/envs/DOMINOR/lib/R
 ```
 
-Install `mclust` package in R:
+Install `mclust` package:
 ```
-R
-install.packages("mclust")
+conda install -c conda-forge r-mclust
 ```
 
 ## Datasets
