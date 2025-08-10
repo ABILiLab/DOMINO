@@ -1,6 +1,6 @@
 import torch
 from preprocess import preprocess_adj, get_feature, add_contrastive_label, grid_downsample
-from preprocess import optimized_construct_interaction, process_data
+from preprocess import optimized_construct_interaction
 import time
 import random
 import numpy as np
@@ -16,7 +16,7 @@ import os
 import time
 import argparse
 
-from cluster import clustering, search_res
+from cluster import clustering
 
 import warnings
 warnings.filterwarnings('ignore')   
