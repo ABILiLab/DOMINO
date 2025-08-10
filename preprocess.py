@@ -124,15 +124,6 @@ def optimized_construct_interaction(adata, n_neighbors=5, alpha=0.15, eps=1e-6, 
     
     return adata
 
-def preprocess(adata):
-    sc.pp.highly_variable_genes(adata, flavor="seurat_v3", n_top_genes=3000)
-    adata = adata[:, adata.var['highly_variable']].copy()
-    sc.pp.normalize_total(adata, target_sum=1e4)
-    sc.pp.log1p(adata)
-    sc.pp.scale(adata, zero_center=False, max_value=10)
-    
-    return adata
-
 def grid_downsample(
     adata, 
     grid_size=(100, 100), 
@@ -210,95 +201,6 @@ def grid_downsample(
     adata_downsampled.obsm['spatial'] = coords[sampled_indices]
     
     return adata_downsampled
-
-
-def process_10x_slices(data_directory):
-    '''Concurrently process multiple slice data from the 10x Genomics platform.'''
-    slices = os.listdir(data_directory)
-    adata_list = []
-
-    for slice in slices:
-        slice_path = os.path.join(data_directory, slice)   
-        if os.path.isdir(slice_path) :
-            adata = sc.read_visium(slice_path, count_file='filtered_feature_bc_matrix.h5', load_images=True)
-            adata.var_names_make_unique()
-
-            adata = preprocess(adata)
-            adata.obs['slice_id'] = slice
-            df_meta = pd.read_csv(slice_path + '/metadata.tsv', sep='\t')
-            df_meta_layer = df_meta['layer_guess']
-            adata.obs['ground_truth'] = df_meta_layer.values
-
-            adata = adata[~pd.isnull(adata.obs['ground_truth'])]
-            adata_list.append(adata)
-
-    return adata_list
-
-def process_new_data(data_directory): 
-    '''Concurrently process multiple slice data from other platforms (such as CosMx or MERFISH).'''
-    slices = os.listdir(data_directory)
-    adata_list = []
-
-    for slice in slices:
-        if slice.endswith('.h5ad'):
-            slice_path = os.path.join(data_directory, slice)
-            
-            adata = sc.read_h5ad(slice_path)
-            adata.var_names_make_unique()
-
-            slice_name = os.path.splitext(slice)[0]
-            adata.obs['slice'] = slice_name            
-            sc.pp.normalize_total(adata, target_sum=1e4)
-            sc.pp.log1p(adata)
-            sc.pp.scale(adata, zero_center=False, max_value=10)
-
-            df_meta_layer = adata.obs['region']
-            adata.obs['ground_truth'] = df_meta_layer.values
-
-            adata = adata[~pd.isnull(adata.obs['ground_truth'])]
-
-            adata_list.append(adata)
-            print(f"Successfully read the file: {slice}")
-
-    return adata_list
-
-def process_data(platform, dataset_name, slice):
-    '''Process single slice data from the 10x Genomics platform or other platforms (such as CosMx or MERFISH).'''
-    # The slice data is from the 10x Genomics platform.
-    if platform == '10x':
-        input_dir = './data/{}/'.format(dataset_name) + slice
-        adata = sc.read_visium(input_dir, count_file='filtered_feature_bc_matrix.h5', load_images=True)
-        adata.var_names_make_unique()
-        adata = preprocess(adata)
-
-        df_meta = pd.read_csv(input_dir + '/metadata.tsv', sep='\t')
-        df_meta_layer = df_meta['layer_guess']
-        adata.obs['ground_truth'] = df_meta_layer.values
-
-        adata = adata[~pd.isnull(adata.obs['ground_truth'])]
-
-        n_clusters = len(adata.obs['ground_truth'].unique())
-        print(f"Number of ground truth clusters (10x platform): {n_clusters}")
-
-    # The sliced data comes from other platforms (such as CosMx or MERFISH).
-    else:
-        input_dir = './data/{}/'.format(dataset_name) + '{}.h5ad'.format(slice)
-        adata = sc.read_h5ad(input_dir)
-        adata.var_names_make_unique()
-         
-        sc.pp.normalize_total(adata, target_sum=1e4)
-        sc.pp.log1p(adata)
-        sc.pp.scale(adata, zero_center=False, max_value=10)
-
-        df_meta_layer = adata.obs['region']
-        adata.obs['ground_truth'] = df_meta_layer.values
-
-        adata = adata[~pd.isnull(adata.obs['ground_truth'])]
-
-        n_clusters = len(adata.obs['ground_truth'].unique())
-        print(f"Number of ground truth clusters (other platform): {n_clusters}")
-
-    return adata, n_clusters
 
 def get_feature(adata):
     '''Extracts and processes feature matrix from AnnData object.'''
