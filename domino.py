@@ -94,14 +94,13 @@ if __name__ == '__main__':
     ### param setting ###
 
     parser = argparse.ArgumentParser()
-    # General settings
-    parser.add_argument('--platform', type=str, default='CosMx', help="Platform used for the dataset")
-    parser.add_argument('--dataset_name', type=str, default='CosMx_data', help="Name of the dataset to be used")
-    parser.add_argument('--slice_id', type=str, default='Lung6', help="Slice ID from the dataset")
+    # input  and output setting
+    parser.add_argument('--input_file', type=str, default='adata.h5ad', help="The filename of the necessary input file provided by the user")
+    parser.add_argument('--output_file', type=str, default='domino_output.h5ad', help="The output h5ad filename for saving the final clustering results")
 
     # data preprocessing setting
     parser.add_argument('--is_downsample', type=bool, default=True, help="Whether to downsample the data or not(If the dimension of the original data is large, downsampling is required.): True or False")
-    parser.add_argument('--grid_size', type=int, default=80, help="Grid division size")
+    parser.add_argument('--grid_size', type=int, default=100, help="Grid division size")
     parser.add_argument('--downsample_by', type=str, default='median', help="Sampling method: divided into 'random' and 'median'")
     parser.add_argument('--keep_sparse', type=bool, default=True, help="Maintain the sparse matrix format or not: True or False")
 
@@ -125,6 +124,7 @@ if __name__ == '__main__':
     parser.add_argument('--b', type=int, default=1, help="Weight coefficient for graph contrastive learning loss (loss_sl_1 + loss_sl_2)")
 
     # clustering param setting
+    parser.add_argument('--n_clusters', type=int, default=7, help="The number of spatial domain categories for which the slices need to be clustered")
     parser.add_argument('--cluster_method', type=str, default='mclust', help="The tool for clustering. Supported tools include 'mclust', 'leiden', and 'louvain'")
     parser.add_argument('--radius', type=int, default=50, help="The number of neighbors considered during refinement")
     parser.add_argument('--start', type=float, default=0.1, help="The start value for searching corresponding resolution while cluster method is 'leiden' or 'louvain'")
@@ -137,15 +137,21 @@ if __name__ == '__main__':
     start_time = time.time()
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    slice_id = args.slice_id
-
-    # Create the results directory 
-    results_directory = os.path.join('./results/', args.dataset_name)
-    os.makedirs(results_directory, exist_ok=True) 
-    results = []
-
     # Data preprocessing
-    adata, n_clusters = process_data(args.platform, args.dataset_name, slice_id)
+    data_root = './data/'
+    input_file = os.path.join(data_root, args.input_file)
+
+    results_directory = './results/'
+    os.makedirs(results_directory, exist_ok=True)
+
+    adata = sc.read_h5ad(input_file)
+    adata.var_names_make_unique()
+        
+    sc.pp.normalize_total(adata, target_sum=1e4)
+    sc.pp.log1p(adata)
+    sc.pp.scale(adata, zero_center=False, max_value=10)
+
+    slice_id = os.path.splitext(args.input_file)[0]
 
     print('Processing slice:', slice_id)
     # print(f"original size: {adata.n_obs}x{adata.n_vars}")
@@ -163,45 +169,13 @@ if __name__ == '__main__':
 
     print("Clustering...")
 
-    print(f'slice: {slice_id}, n_clusters: {n_clusters}')
+    print(f'slice: {slice_id}, n_clusters: {args.n_clusters}')
 
-    clustering(adata, radius=args.radius, n_clusters=n_clusters, method=args.cluster_method, start=args.start, end=args.end, increment=args.increment, refinement=args.refinement)
+    clustering(adata, radius=args.radius, n_clusters=args.n_clusters, method=args.cluster_method, start=args.start, end=args.end, increment=args.increment, refinement=args.refinement)
 
-    true_labels = adata.obs['ground_truth']
-    pred_labels = adata.obs['domain']
+    output_path = os.path.join(results_directory, args.output_file)
+    adata.write_h5ad(output_path) 
 
-    # ARI
-    ARI = metrics.adjusted_rand_score(pred_labels, true_labels)
-    # NMI
-    NMI = metrics.normalized_mutual_info_score(pred_labels, true_labels)
-    # FMI
-    FMI = metrics.fowlkes_mallows_score(pred_labels, true_labels)
-    # Silhouette Score
-    silhouette_score = metrics.silhouette_score(adata.obsm['emb'], true_labels, metric='euclidean')
-    silhouette_scaled = (silhouette_score + 1) / 2
-
-    print(f'slice: {slice_id}')
-    print(f'ARI: {ARI:.4f}, NMI: {NMI:.4f}, FMI: {FMI:.4f}, Silhouette_Scaled: {silhouette_scaled:.4f}, Mean: {np.mean([ARI, NMI, FMI, silhouette_scaled]):.4f}')
-
-    elapsed_time = time.time() - start_time
-    # Output computing time 
-    print(f"computing time for slice {slice_id}: {elapsed_time:.4f} seconds")
-
-    # Add the results to the table
-    results.append({
-        'Slice_ID': slice_id,
-        'ARI': ARI,
-        'NMI': NMI,
-        'FMI': FMI,
-        'Silhouette_Scaled': silhouette_scaled,
-        'Mean_Score': np.mean([ARI, NMI, FMI, silhouette_scaled]),
-        'Computing_time(s)': elapsed_time
-    })
-
-    results_df = pd.DataFrame(results)
-
-    # Save the results
-    results_df.to_csv(os.path.join(results_directory, 'clustering_results.csv'))
 
 
 
