@@ -175,6 +175,7 @@ if __name__ == '__main__':
 
     output_path = os.path.join(results_directory, args.output_file)
     adata.write_h5ad(output_path) 
+    print("Done!")
 
 
 
