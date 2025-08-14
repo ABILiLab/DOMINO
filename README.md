@@ -19,7 +19,7 @@ pip install torch-geometric==2.5.3
 Install `rpy2` package:
 ```
 conda install -c conda-forge r-base=4.1.0
-conda install -c r rpy2
+conda install -c conda-forge rpy2
 ```
 
 Configure the relevant environment variables:
