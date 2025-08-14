@@ -148,6 +148,10 @@ def grid_downsample(
     
     """
     coords = adata.obsm['spatial']
+    if isinstance(coords, pd.DataFrame):
+        coords = coords.to_numpy()
+    else:
+        coords = np.asarray(coords)
     min_x, min_y = coords.min(axis=0)
     max_x, max_y = coords.max(axis=0)
     
