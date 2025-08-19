@@ -2,6 +2,7 @@ import os
 import numpy as np
 import pandas as pd
 import scanpy as sc
+import torch
 import scipy.sparse as sp
 from scipy.sparse import csc_matrix
 from scipy.sparse import csr_matrix
@@ -9,7 +10,6 @@ from sklearn.neighbors import NearestNeighbors
 from scipy import sparse
 from scipy.sparse import eye, diags
 from scipy.sparse import lil_matrix, coo_matrix
-
 
 def permutation(feature):
     '''Randomly shuffles the rows of input feature matrix.'''
@@ -39,7 +39,7 @@ def _arnoldi_iteration(T, alpha, max_iter, tol):
         
     return S
 
-def optimized_balanced_gdc(A, alpha=0.15, eps=1e-6, n_iter=35, tol=1e-5):
+def optimized_balanced_gdc(A, alpha=0.15, eps=1e-6, n_iter=35, tol=1e-5, k=50):
     """optimized balance of PPR diffusion."""
     N = A.shape[0]
     
@@ -59,6 +59,27 @@ def optimized_balanced_gdc(A, alpha=0.15, eps=1e-6, n_iter=35, tol=1e-5):
     # Efficient sparsification and normalization.
     S.data[S.data < eps] = 0
     S.eliminate_zeros()
+
+    # Enforce sparsity by keeping top-k edges per node.
+    if k is not None:
+        rows, cols = S.nonzero()
+        data = S.data
+        coo_dict = {}
+        for i, j, v in zip(rows, cols, data):
+            if i not in coo_dict:
+                coo_dict[i] = []
+            coo_dict[i].append((j, v))
+        
+        # Keep top-k edges per node.
+        new_rows, new_cols, new_data = [], [], []
+        for i in coo_dict:
+            edges = sorted(coo_dict[i], key=lambda x: -x[1])[:k]
+            for j, v in edges:
+                new_rows.append(i)
+                new_cols.append(j)
+                new_data.append(v)
+        
+        S = sp.coo_matrix((new_data, (new_rows, new_cols)), shape=(N, N)).tocsr()
     
     # Use a more stable normalization method.
     D_tilde_vec = S.sum(axis=1).A.ravel()
@@ -124,6 +145,15 @@ def optimized_construct_interaction(adata, n_neighbors=5, alpha=0.15, eps=1e-6, 
     
     return adata
 
+def preprocess(adata):
+    sc.pp.highly_variable_genes(adata, flavor="seurat_v3", n_top_genes=3000)
+    adata = adata[:, adata.var['highly_variable']].copy()
+    sc.pp.normalize_total(adata, target_sum=1e4)
+    sc.pp.log1p(adata)
+    sc.pp.scale(adata, zero_center=False, max_value=10)
+    
+    return adata
+
 def grid_downsample(
     adata, 
     grid_size=(100, 100), 
@@ -148,10 +178,6 @@ def grid_downsample(
     
     """
     coords = adata.obsm['spatial']
-    if isinstance(coords, pd.DataFrame):
-        coords = coords.to_numpy()
-    else:
-        coords = np.asarray(coords)
     min_x, min_y = coords.min(axis=0)
     max_x, max_y = coords.max(axis=0)
     
@@ -237,10 +263,27 @@ def normalize_adj(adj):
     d_inv_sqrt[np.isinf(d_inv_sqrt)] = 0.
     d_mat_inv_sqrt = sp.diags(d_inv_sqrt)
     adj = adj.dot(d_mat_inv_sqrt).transpose().dot(d_mat_inv_sqrt)
-    return adj.toarray()
+    return adj
 
 def preprocess_adj(adj):
     """Preprocessing of adjacency matrix for simple GCN model and conversion to tuple representation."""
-    adj_normalized = normalize_adj(adj)+np.eye(adj.shape[0])
+    adj_normalized = normalize_adj(adj)+ eye(adj.shape[0])
     return adj_normalized 
 
+def preprocess_adj_sparse(adj):
+    adj = sp.coo_matrix(adj)
+    adj_ = adj + sp.eye(adj.shape[0])
+    rowsum = np.array(adj_.sum(1))
+    degree_mat_inv_sqrt = sp.diags(np.power(rowsum, -0.5).flatten())
+    adj_normalized = adj_.dot(degree_mat_inv_sqrt).transpose().dot(degree_mat_inv_sqrt).tocoo()
+    return adj_normalized
+
+def adj_to_edge_index(adj):
+    """Convert SciPy sparse matrix to edge_index."""
+    if isinstance(adj, np.ndarray):
+        adj = csr_matrix(adj)
+    if not isinstance(adj, (csr_matrix, coo_matrix, csc_matrix)):
+        raise ValueError("Input must be a SciPy sparse matrix.")
+    rows, cols = adj.nonzero()
+    edge_index = torch.stack([torch.tensor(rows), torch.tensor(cols)], dim=0)
+    return edge_index.long()
