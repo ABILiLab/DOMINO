@@ -11,6 +11,7 @@ from scipy import sparse
 from scipy.sparse import eye, diags
 from scipy.sparse import lil_matrix, coo_matrix
 
+
 def permutation(feature):
     '''Randomly shuffles the rows of input feature matrix.'''
     ids = np.arange(feature.shape[0])
@@ -20,7 +21,7 @@ def permutation(feature):
     
     return feature_permutated 
     
-def _arnoldi_iteration(T, alpha, max_iter, tol):
+def _arnoldi_iteration(T, alpha, max_iter, tol, eps=1e-6):
     """Arnoldi iteration method for accelerating convergence."""
     N = T.shape[0]
     S = alpha * sp.eye(N, dtype=np.float32, format='csr')
@@ -29,6 +30,10 @@ def _arnoldi_iteration(T, alpha, max_iter, tol):
     for _ in range(max_iter):
         delta = alpha * X
         S += delta
+
+        # Immediately filter out the tiny values after each iteration.
+        delta.data[delta.data < eps] = 0
+        delta.eliminate_zeros()
         
         # Check for convergence.
         if delta.nnz == 0 or np.abs(delta).sum() < tol * N:
@@ -51,7 +56,8 @@ def optimized_balanced_gdc(A, alpha=0.15, eps=1e-6, n_iter=35, tol=1e-5, k=50):
     A_loop = A + eye(N, dtype=np.float32, format='csr')
     D_loop_vec = A_loop.sum(axis=1).A.ravel().astype(np.float32)
     D_loop_invsqrt = diags(1 / np.sqrt(D_loop_vec + 1e-12), dtype=np.float32, format='csr')
-    T_sym = D_loop_invsqrt @ A_loop @ D_loop_invsqrt
+    # T_sym = D_loop_invsqrt @ A_loop @ D_loop_invsqrt
+    T_sym = D_loop_invsqrt.dot(A_loop).dot(D_loop_invsqrt)
 
     # Perform Arnoldi iteration.
     S = _arnoldi_iteration(T_sym, alpha, n_iter, tol)
@@ -84,7 +90,8 @@ def optimized_balanced_gdc(A, alpha=0.15, eps=1e-6, n_iter=35, tol=1e-5, k=50):
     # Use a more stable normalization method.
     D_tilde_vec = S.sum(axis=1).A.ravel()
     D_tilde_inv = diags(1 / np.maximum(D_tilde_vec, 1e-12), dtype=np.float32, format='csr')
-    return S @ D_tilde_inv
+    # return S @ D_tilde_inv
+    return S.dot(D_tilde_inv)
 
 def build_sparse_adjacency(position, n_neighbors=5):
     """Efficient construction of sparse adjacency matrix."""
@@ -271,19 +278,16 @@ def preprocess_adj(adj):
     return adj_normalized 
 
 def preprocess_adj_sparse(adj):
+    """Convert scipy sparse matrix to torch.sparse.FloatTensor."""
     adj = sp.coo_matrix(adj)
     adj_ = adj + sp.eye(adj.shape[0])
     rowsum = np.array(adj_.sum(1))
     degree_mat_inv_sqrt = sp.diags(np.power(rowsum, -0.5).flatten())
     adj_normalized = adj_.dot(degree_mat_inv_sqrt).transpose().dot(degree_mat_inv_sqrt).tocoo()
-    return adj_normalized
+    
+    indices = torch.from_numpy(np.vstack([adj_normalized.row, adj_normalized.col])).long()
+    values = torch.from_numpy(adj_normalized.data).float()
+    shape = torch.Size(adj_normalized.shape)
 
-def adj_to_edge_index(adj):
-    """Convert SciPy sparse matrix to edge_index."""
-    if isinstance(adj, np.ndarray):
-        adj = csr_matrix(adj)
-    if not isinstance(adj, (csr_matrix, coo_matrix, csc_matrix)):
-        raise ValueError("Input must be a SciPy sparse matrix.")
-    rows, cols = adj.nonzero()
-    edge_index = torch.stack([torch.tensor(rows), torch.tensor(cols)], dim=0)
-    return edge_index.long()
+    return torch.sparse.FloatTensor(indices, values, shape)
+
