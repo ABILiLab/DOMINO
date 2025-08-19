@@ -16,8 +16,9 @@ class GCNEncoder(nn.Module):
 
     def forward(self, x, adj_sparse):
         x = F.dropout(x, self.dropout, training=self.training)
-        x = torch.sparse.mm(adj_sparse, x)  # Sparse multiplication
         x = self.linear(x)
+        x = torch.spmm(adj_sparse, x)  # Sparse multiplication
+        
         return self.act(x)
 
 class SharedMLP(nn.Module):
