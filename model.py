@@ -2,24 +2,23 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.parameter import Parameter
-from torch_geometric.nn import GCNConv
 from torch.nn.modules.module import Module
 from torch_geometric.utils import dense_to_sparse
     
 from layer import AvgReadout, Discriminator
-    
-class GCNEncoder(Module):
+
+class GCNEncoder(nn.Module):
     def __init__(self, input_dim, hidden_dim, output_dim, dropout=0.5, act=F.relu):
         super(GCNEncoder, self).__init__()
-        self.conv1 = GCNConv(input_dim, output_dim)
+        self.linear = nn.Linear(input_dim, output_dim)
         self.dropout = dropout
         self.act = act
 
-    def forward(self, x, edge_index):
+    def forward(self, x, adj_sparse):
         x = F.dropout(x, self.dropout, training=self.training)
-        x = self.act(self.conv1(x, edge_index))
-    
-        return x
+        x = torch.sparse.mm(adj_sparse, x)  # Sparse multiplication
+        x = self.linear(x)
+        return self.act(x)
 
 class SharedMLP(nn.Module):
     '''A shared MLP with two hidden layers and PReLU activation.'''
