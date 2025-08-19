@@ -1,6 +1,6 @@
 import torch
-from preprocess import preprocess_adj, get_feature, add_contrastive_label, grid_downsample
-from preprocess import optimized_construct_interaction
+from preprocess import preprocess_adj, preprocess_adj_sparse, get_feature, add_contrastive_label, grid_downsample
+from preprocess import optimized_construct_interaction, adj_to_edge_index
 import time
 import random
 import numpy as np
@@ -16,7 +16,7 @@ import os
 import time
 import argparse
 
-from cluster import clustering
+from cluster import clustering, search_res
 
 import warnings
 warnings.filterwarnings('ignore')   
@@ -44,11 +44,11 @@ def train_model(adata, device):
 
     input_dim = features.shape[1]
 
-    adj = preprocess_adj(adj)
-    adj = torch.FloatTensor(adj).to(device)
+    adj = preprocess_adj_sparse(adj)
+    edge_index = adj_to_edge_index(adj).to(device)
 
-    adj_diffusion = preprocess_adj(adj_diffusion)
-    adj_diffusion = torch.FloatTensor(adj_diffusion).to(device)
+    adj_diffusion = preprocess_adj_sparse(adj_diffusion)
+    edge_index_diff = adj_to_edge_index(adj_diffusion).to(device)
 
     # Initialize the model 
     model = GDCGraphCL(input_dim, hidden_dim, output_dim, proj_dim, graph_neigh, graph_diffusion).to(device)
@@ -62,7 +62,7 @@ def train_model(adata, device):
     for epoch in tqdm(range(epochs)): 
         model.train()
             
-        emb, ret, ret_a = model(features, features_a, adj, adj_diffusion)
+        emb, ret, ret_a = model(features, features_a, edge_index, edge_index_diff)
         
         # Calculate loss 
         loss_sl_1 = loss_CSL(ret, label_CSL)  # Graph contrastive loss for original view
@@ -84,7 +84,7 @@ def train_model(adata, device):
     
     with torch.no_grad():
         model.eval()
-        emb_rec = model(features, features_a, adj, adj_diffusion)[0].detach().cpu().numpy()
+        emb_rec = model(features, features_a, edge_index, edge_index_diff)[0].detach().cpu().numpy()
         adata.obsm['emb'] = emb_rec
             
         return adata
@@ -134,7 +134,6 @@ if __name__ == '__main__':
 
     args = parser.parse_args()
 
-    start_time = time.time()
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     # Data preprocessing
