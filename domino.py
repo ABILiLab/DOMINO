@@ -1,6 +1,6 @@
 import torch
 from preprocess import preprocess_adj, preprocess_adj_sparse, get_feature, add_contrastive_label, grid_downsample
-from preprocess import optimized_construct_interaction, adj_to_edge_index
+from preprocess import optimized_construct_interaction
 import time
 import random
 import numpy as np
@@ -45,10 +45,10 @@ def train_model(adata, device):
     input_dim = features.shape[1]
 
     adj = preprocess_adj_sparse(adj)
-    edge_index = adj_to_edge_index(adj).to(device)
+    adj = adj.to(device)
 
     adj_diffusion = preprocess_adj_sparse(adj_diffusion)
-    edge_index_diff = adj_to_edge_index(adj_diffusion).to(device)
+    adj_diffusion = adj_diffusion.to(device)
 
     # Initialize the model 
     model = GDCGraphCL(input_dim, hidden_dim, output_dim, proj_dim, graph_neigh, graph_diffusion).to(device)
@@ -62,7 +62,7 @@ def train_model(adata, device):
     for epoch in tqdm(range(epochs)): 
         model.train()
             
-        emb, ret, ret_a = model(features, features_a, edge_index, edge_index_diff)
+        emb, ret, ret_a = model(features, features_a, adj, adj_diffusion)
         
         # Calculate loss 
         loss_sl_1 = loss_CSL(ret, label_CSL)  # Graph contrastive loss for original view
@@ -84,7 +84,7 @@ def train_model(adata, device):
     
     with torch.no_grad():
         model.eval()
-        emb_rec = model(features, features_a, edge_index, edge_index_diff)[0].detach().cpu().numpy()
+        emb_rec = model(features, features_a, adj, adj_diffusion)[0].detach().cpu().numpy()
         adata.obsm['emb'] = emb_rec
             
         return adata
@@ -108,15 +108,16 @@ if __name__ == '__main__':
     parser.add_argument('--n_neighbors', type=int, default=5, help="Number of nearest neighbors to consider when constructing the spatial adjacency graph")
 
     # data augmentation setting
-    parser.add_argument('--alpha', type=float, default=0.15, help="Teleport probability (restart probability) for random walk diffusion, controls the balance between local and global structure")
+    parser.add_argument('--alpha', type=float, default=0.1, help="Teleport probability (restart probability) for random walk diffusion, controls the balance between local and global structure")
     parser.add_argument('--n_iter', type=str, default='auto', help="Maximum number of iterations for Arnoldi iteration ('auto' determines based on spot count: 40 for <2000 spots, 30 for <5000, 25 otherwise)")
     parser.add_argument('--eps', type=float, default=1e-6, help="Threshold for sparsification-values below this are set to zero in the diffusion matrix")
     parser.add_argument('--tol', type=float, default=1e-5, help="Tolerance threshold for convergence check in Arnoldi iteration (relative to matrix size)")
+    parser.add_argument('--k', type=int, default=50, help="Limit the maximum number of neighbors retained for each node")
 
     # training param setting
     parser.add_argument('--lr', type=float, default=0.001, help="Learning rate for the Adam optimizer")
     parser.add_argument('--weight_decay', type=float, default=1e-5, help="Weight decay (L2 penalty) for regularization")
-    parser.add_argument('--epochs', type=int, default=600, help="Number of training epochs")
+    parser.add_argument('--epochs', type=int, default=800, help="Number of training epochs")
     parser.add_argument('--hidden_dim', type=int, default=512, help="Dimension of hidden layers in the GNN model")
     parser.add_argument('--output_dim', type=int, default=256, help="Dimension of the output embedding")
     parser.add_argument('--proj_dim', type=int, default=128, help="Dimension of the projection head for the mlp layers")
@@ -124,7 +125,7 @@ if __name__ == '__main__':
     parser.add_argument('--b', type=int, default=1, help="Weight coefficient for graph contrastive learning loss (loss_sl_1 + loss_sl_2)")
 
     # clustering param setting
-    parser.add_argument('--n_clusters', type=int, default=7, help="The number of spatial domain categories for which the slices need to be clustered")
+    parser.add_argument('--n_clusters', type=int, default=8, help="The number of spatial domain categories for which the slices need to be clustered")
     parser.add_argument('--cluster_method', type=str, default='mclust', help="The tool for clustering. Supported tools include 'mclust', 'leiden', and 'louvain'")
     parser.add_argument('--radius', type=int, default=50, help="The number of neighbors considered during refinement")
     parser.add_argument('--start', type=float, default=0.1, help="The start value for searching corresponding resolution while cluster method is 'leiden' or 'louvain'")
@@ -175,11 +176,6 @@ if __name__ == '__main__':
     output_path = os.path.join(results_directory, args.output_file)
     adata.write_h5ad(output_path) 
     print("Done!")
-
-
-
-
-    
 
 
 
