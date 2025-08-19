@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.parameter import Parameter
-from torch_geometric.nn import GCNConv, GATConv
+from torch_geometric.nn import GCNConv
 from torch.nn.modules.module import Module
 from torch_geometric.utils import dense_to_sparse
     
@@ -87,12 +87,10 @@ class GDCGraphCL(Module):
         self.read = AvgReadout()      
 
     def encode(self, feat, adj):
-        edge_index, _ = dense_to_sparse(adj)
-        return self.encoder(feat, edge_index)
+        return self.encoder(feat, adj)
 
     def decode(self, h, adj):
-        edge_index, _ = dense_to_sparse(adj)
-        return self.decoder(h, edge_index)
+        return self.decoder(h, adj)
 
     def forward(self, feat, feat_a, adj, gdc_adj):
         # Original view
