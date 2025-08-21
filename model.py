@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.parameter import Parameter
 from torch.nn.modules.module import Module
-from torch_geometric.utils import dense_to_sparse
+#from torch_geometric.utils import dense_to_sparse Not use anymore
     
 from layer import AvgReadout, Discriminator
 
@@ -17,7 +17,7 @@ class GCNEncoder(nn.Module):
     def forward(self, x, adj_sparse):
         x = F.dropout(x, self.dropout, training=self.training)
         x = self.linear(x)
-        x = torch.spmm(adj_sparse, x)  # Sparse multiplication
+        x = torch.sparse.mm(adj_sparse, x)  # Sparse multiplication
         
         return self.act(x)
 
@@ -33,6 +33,8 @@ class SharedMLP(nn.Module):
         x = self.prelu(self.fc1(x))
         x = self.fc3(x)
         return x
+
+
     
 class GDCGraphCL(Module):
     '''
@@ -84,7 +86,13 @@ class GDCGraphCL(Module):
 
         self.disc = Discriminator(proj_dim)
         self.sigm = nn.Sigmoid()
-        self.read = AvgReadout()      
+        self.read = AvgReadout()
+    
+    # when reading sparse graphs, using this to avoid dense
+    def _sparse_avg(self, H, A_sp):
+        deg = torch.sparse.sum(A_sp, dim=1).to_dense().clamp_min(1.0)
+        out = torch.sparse.mm(A_sp, H)
+        return out / deg.unsqueeze(1)
 
     def encode(self, feat, adj):
         return self.encoder(feat, adj)
@@ -107,12 +115,12 @@ class GDCGraphCL(Module):
         shuf_z = self.mlp(shuf_h)
         
         # Original view graph representation
-        g = self.read(h, self.graph_neigh) 
+        g = self._sparse_avg(h, self.graph_neigh) 
         g = self.sigm(g)
         g = self.mlp(g)  
 
         # Diffusion-augmented view graph representation
-        g_g = self.read(h_g, self.graph_diffusion)
+        g_g = self._sparse_avg(h_g, self.graph_diffusion)
         g_g = self.sigm(g_g)  
         g_g = self.mlp(g_g)
 

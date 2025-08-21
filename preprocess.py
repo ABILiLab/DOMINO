@@ -194,6 +194,7 @@ def grid_downsample(
     y_bins = np.linspace(min_y, max_y+eps_y, grid_size[1]+1)
     
     # Calculate grid coordinates (vectorization).
+    coords = np.asarray(coords)
     x_idx = np.digitize(coords[:,0], x_bins) - 1
     y_idx = np.digitize(coords[:,1], y_bins) - 1
     grid_ids = x_idx * grid_size[1] + y_idx

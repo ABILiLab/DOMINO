@@ -4,7 +4,7 @@ import scanpy as sc
 import ot
 from sklearn.decomposition import PCA
 from sklearn.cluster import MiniBatchKMeans
-
+import ot.backend as otb
 
 def mclust_R(adata, num_cluster, modelNames='EEE', used_obsm='emb_pca', random_seed=2020):
     """
@@ -92,29 +92,103 @@ def clustering(adata, radius=50, n_clusters=7, method='mclust', start=0.1, end=3
        new_type = refine_label(adata, radius, key='domain')
        adata.obs['domain'] = new_type
         
-def refine_label(adata, radius=50, key='label'):
+# using blocking to reduce memory usage
+def refine_label(adata, radius=50, key='label', row_block=4096):
     '''Based on the spatial position information of cells, local smoothing and optimization are performed on the initial clustering results.'''
     n_neigh = radius
     new_type = []
     old_type = adata.obs[key].values
     
+    print("refining domain..")
+
     #calculate distance
     position = adata.obsm['spatial']
-    distance = ot.dist(position, position, metric='euclidean')
-           
-    n_cell = distance.shape[0]
+    if hasattr(position, "toarray"):          
+        position = position.toarray()
+    elif hasattr(position, "to_numpy"):       
+        position = position.to_numpy()
+    elif "torch" in type(position).__module__:  
+        position = position.detach().cpu().numpy()
+
+    position = np.asarray(position, dtype=np.float64)
+    if position.ndim != 2 or position.shape[1] < 2:
+        raise ValueError(f"spatial must be (n,>=2), got {position.shape}")
+    position = np.ascontiguousarray(position[:, :2]) 
+
+    #try:
+    #    import ot.backend as otb
+    #    if hasattr(otb, "set_default_backend"):
+    #        otb.set_default_backend("numpy")
+    #except Exception:
+    #    pass
     
-    for i in range(n_cell):
-        vec  = distance[i, :]
-        index = vec.argsort()
-        neigh_type = []
-        for j in range(1, n_neigh+1):
-            neigh_type.append(old_type[index[j]])
-        max_type = max(neigh_type, key=neigh_type.count)
-        new_type.append(max_type)
+    #print("getting distances..")
+    #distance = ot.dist(position, position, metric='euclidean')
+    #print("finish geitting diantance..")
+    #n_cell = distance.shape[0]
+
+    print("running optimal transport...")
+    # use blockwise computation in optimal transport
+    # calculating distances only for a subset of rows against 
+    # the whole matrix at a time, and keep only the
+    # top-k neighbor indices per row, without storing 
+    # the full distance matrix in memory.   
+    n_cell = position.shape[0]
+    if n_cell <= 1 or n_neigh < 1:
+        return [str(x) for x in old_type]
+    n_neigh = min(n_neigh, n_cell - 1)
+    
+    cats = pd.Categorical(old_type)
+    codes = cats.codes   
+    n_classes = len(cats.categories)
+
+    #for i in range(n_cell):
+    #    vec  = distance[i, :]
+    #    index = vec.argsort()
+    #    neigh_type = []
+    #    for j in range(1, n_neigh+1):
+    #        neigh_type.append(old_type[index[j]])
+    #    max_type = max(neigh_type, key=neigh_type.count)
+    #    new_type.append(max_type)
+
+    for start in range(0, n_cell, row_block):
+        stop = min(start + row_block, n_cell)
+        block = position[start:stop]
+
+        D = ot.dist(block, position, metric='euclidean')
+
+        part = np.argpartition(D, kth=n_neigh, axis=1)[:, :n_neigh+1]
+        rows = np.arange(part.shape[0])[:, None]
+        part = part[rows, np.argsort(D[rows, part], axis=1)]
+
+        for i in range(stop - start):
+            idx = part[i]
+            self_col = start + i
+
+            if idx[0] == self_col:
+                idx = idx[1:n_neigh+1]
+            else:
+                idx = idx[:n_neigh]
+                idx = idx[idx != self_col]
+
+            neigh_codes = codes[idx]
+            neigh_codes = neigh_codes[neigh_codes >= 0]
+            if neigh_codes.size == 0:
+                new_label_code = codes[start + i]
+            else:
+                cnt = np.bincount(neigh_codes, minlength=n_classes)
+                winners = np.flatnonzero(cnt == cnt.max())
+                new_label_code = (codes[start + i]
+                                   if codes[start + i] in winners
+                                   else winners[0])
+
+            new_type.append(cats.categories[new_label_code] if new_label_code >= 0
+                            else str(old_type[start + i]))
+        del D, part
         
-    new_type = [str(i) for i in list(new_type)]    
-    
+    new_type = [str(i) for i in list(new_type)]
+
+    print("finished refining...")
     return new_type
 
 def search_res(adata, n_clusters, method='leiden', use_rep='emb', start=0.1, end=3.0, increment=0.01):

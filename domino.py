@@ -21,8 +21,35 @@ from cluster import clustering, search_res
 import warnings
 warnings.filterwarnings('ignore')   
 
+# two new function for stop making dense matrix when generating graphs
+def _to_sparse_coo(A):
+    import scipy.sparse as sp
+    if hasattr(A, "tocoo"):
+        A = A.tocoo()
+        import numpy as np
+        idx = torch.from_numpy(np.vstack([A.row, A.col]).astype("int64"))
+        val = torch.from_numpy(A.data.astype("float32"))
+        return torch.sparse_coo_tensor(idx, val, A.shape).coalesce()
+    elif isinstance(A, np.ndarray):
+        ii, jj = np.nonzero(A)
+        val = A[ii, jj].astype("float32")
+        idx = torch.from_numpy(np.vstack([ii, jj]).astype("int64"))
+        val = torch.from_numpy(val)
+        return torch.sparse_coo_tensor(idx, val, A.shape).coalesce()
+    elif isinstance(A, torch.Tensor) and A.is_sparse:
+        return A.coalesce()
+    else:
+        raise TypeError(f"Unsupported adjacency type: {type(A)}")
+
+def _add_self_loops_sparse(A_sp):
+    n = A_sp.shape[0]
+    idx = torch.arange(n, device=A_sp.device)
+    I = torch.sparse_coo_tensor(torch.stack([idx, idx]), torch.ones(n, device=A_sp.device, dtype=A_sp.dtype), (n, n))
+    return (A_sp + I).coalesce()
+
 def train_model(adata, device):
     # Hyperparameter settings
+    print("setting parameters..")
     learning_rate=args.lr
     weight_decay=args.weight_decay
     epochs=args.epochs
@@ -33,16 +60,20 @@ def train_model(adata, device):
     beta = args.b
 
     features = torch.FloatTensor(adata.obsm['feat'].copy()).to(device)
+    input_dim = features.shape[1]
     features_a = torch.FloatTensor(adata.obsm['feat_a'].copy()).to(device)
     label_CSL = torch.FloatTensor(adata.obsm['label_CSL']).to(device)
     # Symmetric adjacency for neighborhood aggregation
     adj = adata.obsm['adj']
     adj_diffusion = adata.obsm['adj_diffusion']
+    
     # Adjacency matrix, used as a mask for pooling operations
-    graph_neigh = torch.FloatTensor(adata.obsm['graph_neigh'].copy() + np.eye(adj.shape[0])).to(device)
-    graph_diffusion = torch.FloatTensor(adata.obsm['graph_diffusion'].copy() + np.eye(adj.shape[0])).to(device)
+    print("generating graphs..")
+    #graph_neigh = torch.FloatTensor(adata.obsm['graph_neigh'].copy() + np.eye(adj.shape[0])).to(device)
+    #graph_diffusion = torch.FloatTensor(adata.obsm['graph_diffusion'].copy() + np.eye(adj.shape[0])).to(device)
 
-    input_dim = features.shape[1]
+    graph_neigh = _add_self_loops_sparse(_to_sparse_coo(adata.obsm['graph_neigh'])).to(device)
+    graph_diff  = _add_self_loops_sparse(_to_sparse_coo(adata.obsm['graph_diffusion'])).to(device)
 
     adj = preprocess_adj_sparse(adj)
     adj = adj.to(device)
@@ -51,7 +82,9 @@ def train_model(adata, device):
     adj_diffusion = adj_diffusion.to(device)
 
     # Initialize the model 
-    model = GDCGraphCL(input_dim, hidden_dim, output_dim, proj_dim, graph_neigh, graph_diffusion).to(device)
+    print("Initializing model..")
+    model = GDCGraphCL(input_dim, hidden_dim, output_dim, proj_dim, graph_neigh, graph_diff).to(device)
+
     # Binary cross-entropy loss for contrastive learning
     loss_CSL = nn.BCEWithLogitsLoss()
     optimizer = torch.optim.Adam(model.parameters(), learning_rate, weight_decay=weight_decay)
@@ -99,7 +132,7 @@ if __name__ == '__main__':
     parser.add_argument('--output_file', type=str, default='domino_output.h5ad', help="The output h5ad filename for saving the final clustering results")
 
     # data preprocessing setting
-    parser.add_argument('--is_downsample', type=bool, default=True, help="Whether to downsample the data or not(If the dimension of the original data is large, downsampling is required.): True or False")
+    parser.add_argument('--is_downsample', action="store_true", help="Specify to use downsampling")
     parser.add_argument('--grid_size', type=int, default=100, help="Grid division size")
     parser.add_argument('--downsample_by', type=str, default='median', help="Sampling method: divided into 'random' and 'median'")
     parser.add_argument('--keep_sparse', type=bool, default=True, help="Maintain the sparse matrix format or not: True or False")
