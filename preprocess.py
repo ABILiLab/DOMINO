@@ -1,3 +1,5 @@
+# Implementation of functions: permutation, get_feature,add_contrastive_label and preprocess_adj_sparse is based on GraphST:https://doi.org/10.1038/s41467-023-36796-3
+
 import os
 import numpy as np
 import pandas as pd
@@ -153,7 +155,7 @@ def optimized_construct_interaction(adata, n_neighbors=5, alpha=0.15, eps=1e-6, 
     return adata
 
 def preprocess(adata):
-    sc.pp.highly_variable_genes(adata, flavor="seurat_v3", n_top_genes=3000)
+    sc.pp.highly_variable_genes(adata, flavor="seurat_v3", n_top_genes=2000)
     adata = adata[:, adata.var['highly_variable']].copy()
     sc.pp.normalize_total(adata, target_sum=1e4)
     sc.pp.log1p(adata)
@@ -263,21 +265,6 @@ def add_contrastive_label(adata):
     label_CSL = np.concatenate([one_matrix, zero_matrix], axis=1)
     adata.obsm['label_CSL'] = label_CSL
     
-def normalize_adj(adj):
-    """Symmetrically normalize adjacency matrix."""
-    adj = sp.coo_matrix(adj)
-    rowsum = np.array(adj.sum(1))
-    d_inv_sqrt = np.power(rowsum, -0.5).flatten()
-    d_inv_sqrt[np.isinf(d_inv_sqrt)] = 0.
-    d_mat_inv_sqrt = sp.diags(d_inv_sqrt)
-    adj = adj.dot(d_mat_inv_sqrt).transpose().dot(d_mat_inv_sqrt)
-    return adj
-
-def preprocess_adj(adj):
-    """Preprocessing of adjacency matrix for simple GCN model and conversion to tuple representation."""
-    adj_normalized = normalize_adj(adj)+ eye(adj.shape[0])
-    return adj_normalized 
-
 def preprocess_adj_sparse(adj):
     """Convert scipy sparse matrix to torch.sparse.FloatTensor."""
     adj = sp.coo_matrix(adj)
