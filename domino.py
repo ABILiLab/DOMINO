@@ -179,10 +179,11 @@ if __name__ == '__main__':
 
     adata = sc.read_h5ad(input_file)
     adata.var_names_make_unique()
-        
-    sc.pp.normalize_total(adata, target_sum=1e4)
-    sc.pp.log1p(adata)
-    sc.pp.scale(adata, zero_center=False, max_value=10)
+
+    preprocess(adata)
+    # sc.pp.normalize_total(adata, target_sum=1e4)
+    # sc.pp.log1p(adata)
+    # sc.pp.scale(adata, zero_center=False, max_value=10)
 
     slice_id = os.path.splitext(args.input_file)[0]
 
