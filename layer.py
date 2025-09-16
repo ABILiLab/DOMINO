@@ -1,4 +1,4 @@
-# Implementation of class: AvgReadout and Discriminator referencing from GraphST: https://doi.org/10.1038/s41467-023-36796-3
+# Implementation of class: AvgReadout and Discriminator is referencing from GraphST: https://doi.org/10.1038/s41467-023-36796-3
 
 import torch
 import torch.nn as nn
