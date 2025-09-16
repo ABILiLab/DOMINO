@@ -1,3 +1,5 @@
+# Implementation of functions: mclust_R and search_res is referencing from GraphST: https://doi.org/10.1038/s41467-023-36796-3
+
 import numpy as np
 import pandas as pd
 import scanpy as sc
