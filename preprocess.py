@@ -1,4 +1,4 @@
-# Implementation of functions: permutation, get_feature, add_contrastive_label and preprocess_adj_sparse is based on GraphST:https://doi.org/10.1038/s41467-023-36796-3
+# Implementation of functions: permutation, get_feature, add_contrastive_label and preprocess_adj_sparse is referencing from GraphST: https://doi.org/10.1038/s41467-023-36796-3
 
 import os
 import numpy as np
