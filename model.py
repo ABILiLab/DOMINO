@@ -17,8 +17,13 @@ class GCNEncoder(nn.Module):
     def forward(self, x, adj_sparse):
         x = F.dropout(x, self.dropout, training=self.training)
         x = self.linear(x)
-        x = torch.sparse.mm(adj_sparse, x)  # Sparse multiplication
-        
+        # Sparse multiplication
+        if x.is_cuda:
+            with torch.cuda.amp.autocast(enabled=False):
+                x = torch.sparse.mm(adj_sparse.float(), x.float())
+            x = x.to(x.dtype)  # cast back (bf16/fp16-safe)
+        else:
+            x = torch.sparse.mm(adj_sparse, x)
         return self.act(x)
 
 class SharedMLP(nn.Module):
@@ -30,7 +35,17 @@ class SharedMLP(nn.Module):
         self.prelu = nn.PReLU()
         
     def forward(self, x):
-        x = self.prelu(self.fc1(x))
+        orig_dtype = x.dtype
+        x = self.fc1(x)
+
+        if x.is_cuda:
+            # PReLU has no bf16/fp16 CUDA kernel: disable autocast and upcast to fp32
+            with torch.cuda.amp.autocast(enabled=False):
+                x32 = torch.nn.functional.prelu(x.float(), self.prelu.weight.float())
+            x = x32.to(orig_dtype)  
+        else:
+            # CPU path (fp32)
+            x = torch.nn.functional.prelu(x, self.prelu.weight)
         x = self.fc3(x)
         return x
 
@@ -91,8 +106,14 @@ class GDCGraphCL(Module):
     # when reading sparse graphs, using this to avoid dense
     def _sparse_avg(self, H, A_sp):
         deg = torch.sparse.sum(A_sp, dim=1).to_dense().clamp_min(1.0)
-        out = torch.sparse.mm(A_sp, H)
-        return out / deg.unsqueeze(1)
+        if H.is_cuda:
+            with torch.cuda.amp.autocast(enabled=False):
+                out = torch.sparse.mm(A_sp.float(), H.float())
+            out = out.to(H.dtype)
+            deg = deg.to(H.dtype)
+        else:
+            out = torch.sparse.mm(A_sp, H)
+        return out / deg.unsqueeze(1)   
 
     def encode(self, feat, adj):
         return self.encoder(feat, adj)
@@ -106,7 +127,8 @@ class GDCGraphCL(Module):
         # Diffusion-augmented view
         h_g = self.encode(feat, gdc_adj) 
         # Feature-shuffled negative sample
-        shuf_h = self.encode(feat_a, adj)  
+        perm = torch.randperm(feat.size(0), device=feat.device)
+        shuf_h = self.encode(feat[perm], adj)
         # Reconstructed feature
         emb = self.decode(h, adj)
 

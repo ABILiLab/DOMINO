@@ -15,22 +15,24 @@ from sklearn import metrics
 import os
 import time
 import argparse
+import contextlib
 
 from cluster import clustering, search_res
 
 import warnings
 warnings.filterwarnings('ignore')   
 
-# two new function for stop making dense matrix when generating graphs
+# function for stop making dense matrix when generating graphs
 def _to_sparse_coo(A):
     import scipy.sparse as sp
-    if hasattr(A, "tocoo"):
+    if hasattr(A, "tocoo"):             # scipy.sparse
         A = A.tocoo()
         import numpy as np
         idx = torch.from_numpy(np.vstack([A.row, A.col]).astype("int64"))
         val = torch.from_numpy(A.data.astype("float32"))
         return torch.sparse_coo_tensor(idx, val, A.shape).coalesce()
     elif isinstance(A, np.ndarray):
+        # if dense，then make it sparse
         ii, jj = np.nonzero(A)
         val = A[ii, jj].astype("float32")
         idx = torch.from_numpy(np.vstack([ii, jj]).astype("int64"))
@@ -47,6 +49,27 @@ def _add_self_loops_sparse(A_sp):
     I = torch.sparse_coo_tensor(torch.stack([idx, idx]), torch.ones(n, device=A_sp.device, dtype=A_sp.dtype), (n, n))
     return (A_sp + I).coalesce()
 
+def mse_chunked(target, pred, chunk=200_000):
+    """
+    Mean((target - pred)^2) without materializing the full N×F diff.
+    Exactly matches F.mse_loss(..., reduction='mean').
+    Accumulates in float32 for stability (esp. under AMP/bfloat16).
+    """
+    assert target.shape == pred.shape
+    n = target.shape[0]
+    total = target.numel()
+
+    # accumulate in fp32, regardless of AMP autocast dtype
+    acc = pred.new_zeros((), dtype=torch.float32)
+
+    for start in range(0, n, chunk):
+        stop = min(start + chunk, n)
+        diff = (pred[start:stop] - target[start:stop]).to(torch.float32)
+        acc = acc + (diff * diff).sum()
+
+    return acc / total
+
+
 def train_model(adata, device):
     # Hyperparameter settings
     print("setting parameters..")
@@ -61,7 +84,7 @@ def train_model(adata, device):
 
     features = torch.FloatTensor(adata.obsm['feat'].copy()).to(device)
     input_dim = features.shape[1]
-    features_a = torch.FloatTensor(adata.obsm['feat_a'].copy()).to(device)
+    #features_a = torch.FloatTensor(adata.obsm['feat_a'].copy()).to(device)
     label_CSL = torch.FloatTensor(adata.obsm['label_CSL']).to(device)
     # Symmetric adjacency for neighborhood aggregation
     adj = adata.obsm['adj']
@@ -95,7 +118,7 @@ def train_model(adata, device):
     for epoch in tqdm(range(epochs)): 
         model.train()
             
-        emb, ret, ret_a = model(features, features_a, adj, adj_diffusion)
+        emb, ret, ret_a = model(features, None, adj, adj_diffusion)
         
         # Calculate loss 
         loss_sl_1 = loss_CSL(ret, label_CSL)  # Graph contrastive loss for original view
@@ -117,7 +140,7 @@ def train_model(adata, device):
     
     with torch.no_grad():
         model.eval()
-        emb_rec = model(features, features_a, adj, adj_diffusion)[0].detach().cpu().numpy()
+        emb_rec = model(features, None, adj, adj_diffusion)[0].detach().cpu().numpy()
         adata.obsm['emb'] = emb_rec
             
         return adata
@@ -169,6 +192,20 @@ if __name__ == '__main__':
     args = parser.parse_args()
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+
+    torch.backends.cuda.matmul.allow_tf32 = True
+    try:
+        torch.backends.cudnn.allow_tf32 = True
+    except Exception:
+        pass
+    try:
+        torch.set_float32_matmul_precision("medium")
+    except Exception:
+        pass
+
+    # Autocast context: bf16 on CUDA, no-op on CPU
+    use_amp = (device.type == "cuda" and torch.cuda.is_bf16_supported())
+    autocast_ctx = torch.cuda.amp.autocast(dtype=torch.bfloat16) if use_amp else contextlib.nullcontext()
 
     # Data preprocessing
     data_root = './data/'
