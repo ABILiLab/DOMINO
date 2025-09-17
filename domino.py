@@ -115,10 +115,9 @@ def train_model(adata, device):
     print('Begin to train ST data...')
     model.train()
     
-for epoch in tqdm(range(epochs)): 
+    for epoch in tqdm(range(epochs)): 
         model.train()
         optimizer.zero_grad(set_to_none=True)    
-        
         
         with autocast_ctx:
             emb, ret, ret_a = model(features, None, adj, adj_diffusion)
