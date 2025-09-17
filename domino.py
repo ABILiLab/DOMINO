@@ -115,24 +115,25 @@ def train_model(adata, device):
     print('Begin to train ST data...')
     model.train()
     
-    for epoch in tqdm(range(epochs)): 
+for epoch in tqdm(range(epochs)): 
         model.train()
-            
-        emb, ret, ret_a = model(features, None, adj, adj_diffusion)
+        optimizer.zero_grad(set_to_none=True)    
         
-        # Calculate loss 
-        loss_sl_1 = loss_CSL(ret, label_CSL)  # Graph contrastive loss for original view
-        loss_sl_2 = loss_CSL(ret_a, label_CSL)  # Graph contrastive loss for augmented view
-        loss_feat = F.mse_loss(features, emb)  # Feature reconstruction loss
-        # Total loss
-        loss =  alpha*loss_feat + beta*(loss_sl_1 + loss_sl_2)
+        
+        with autocast_ctx:
+            emb, ret, ret_a = model(features, None, adj, adj_diffusion)
+            # Calculate loss 
+            loss_sl_1 = loss_CSL(ret, label_CSL)  # Graph contrastive loss for original view
+            loss_sl_2 = loss_CSL(ret_a, label_CSL)  # Graph contrastive loss for augmented view
+            loss_feat = mse_chunked(features, emb)  # Feature reconstruction loss
+            # Total loss
+            loss =  alpha*loss_feat + beta*(loss_sl_1 + loss_sl_2)
 
         if epoch % 100 == 0:
             print(
                 'Epoch {:0>3d} | Loss:[{:.4f}], loss_feat:[{:.4f}], loss_sl_1:[{:.4f}], loss_sl_2:[{:.4f}]'.format(
                     epoch, loss.item(), loss_feat.item(), loss_sl_1.item(), loss_sl_2.item()))
         
-        optimizer.zero_grad()
         loss.backward() 
         optimizer.step()
     
