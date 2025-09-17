@@ -1,5 +1,5 @@
 import torch
-from preprocess import preprocess_adj, preprocess_adj_sparse, get_feature, add_contrastive_label, grid_downsample
+from preprocess import preprocess, preprocess_adj_sparse, get_feature, add_contrastive_label, grid_downsample
 from preprocess import optimized_construct_interaction
 import time
 import random
