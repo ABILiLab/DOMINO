@@ -37,6 +37,8 @@ conda install -c conda-forge r-mclust
 
 ## Run the code
 
+We have provided the test code test.py in the test directory.
+
 We expect the user to provide such as either 'adata.h5' or 'adata.h5ad' as the necessary input. And make sure to store this input file in the "./data" directory.
 
 At the same time, we also hope that users can provide the number of spatial domain categories for the slices to be clustered, so as to facilitate the subsequent accurate spatial domain identification.
@@ -46,7 +48,7 @@ And the final clustering results will be saved in the h5ad file located in the "
 Run the following code for example:
 
 ```
-python domino.py --input_file adata.h5ad --output_file domino_output.h5ad --n_clusters 7
+python test.py --input_file adata.h5ad --output_file domino_output.h5ad --n_clusters 7
 ```
 
-Check domino.py for overriding default parameters.
+Check test.py for overriding default parameters.
