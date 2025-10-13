@@ -1,22 +1,10 @@
 import torch
-from preprocess import preprocess, preprocess_adj_sparse, get_feature, add_contrastive_label, grid_downsample, optimized_construct_interaction
-import time
-import random
-import numpy as np
 from model import GDCGraphCL
 from tqdm import tqdm
 from torch import nn
-import torch.nn.functional as F
-import pandas as pd
-import scanpy as sc
-import matplotlib.pyplot as plt
-from sklearn import metrics
-import os
-import time
-import argparse
 import contextlib
 
-from cluster import clustering, search_res
+from preprocess import preprocess, preprocess_adj_sparse, get_feature, add_contrastive_label, grid_downsample, optimized_construct_interaction
 
 import warnings
 warnings.filterwarnings('ignore')   
@@ -188,7 +176,7 @@ class DOMINO():
             self.optimizer.zero_grad(set_to_none=True)    
             
             with self.autocast_ctx:
-                self.emb, ret, ret_a = self.model(self.features, None, self.adj, self.adj_diffusion)
+                self.emb, ret, ret_a = self.model(self.features, self.adj, self.adj_diffusion)
                 # Calculate loss 
                 self.loss_sl_1 = self.loss_CSL(ret, self.label_CSL)  # Graph contrastive loss for original view
                 self.loss_sl_2 = self.loss_CSL(ret_a, self.label_CSL)  # Graph contrastive loss for augmented view
@@ -208,7 +196,7 @@ class DOMINO():
         
         with torch.no_grad():
             self.model.eval()
-            self.emb_rec = self.model(self.features, None, self.adj, self.adj_diffusion)[0].detach().cpu().numpy()
+            self.emb_rec = self.model(self.features, self.adj, self.adj_diffusion)[0].detach().cpu().numpy()
             self.adata.obsm['emb'] = self.emb_rec
                 
             return self.adata
