@@ -1,9 +1,7 @@
 import torch
-import numpy as np
 from tqdm import tqdm
 from torch import nn
 import scanpy as sc
-from sklearn import metrics
 import os
 import argparse
 import contextlib
@@ -116,7 +114,7 @@ def train_model(adata, device):
         optimizer.zero_grad(set_to_none=True)    
         
         with autocast_ctx:
-            emb, ret, ret_a = model(features, None, adj, adj_diffusion)
+            emb, ret, ret_a = model(features, adj, adj_diffusion)
             # Calculate loss 
             loss_sl_1 = loss_CSL(ret, label_CSL)  # Graph contrastive loss for original view
             loss_sl_2 = loss_CSL(ret_a, label_CSL)  # Graph contrastive loss for augmented view
@@ -136,7 +134,7 @@ def train_model(adata, device):
     
     with torch.no_grad():
         model.eval()
-        emb_rec = model(features, None, adj, adj_diffusion)[0].detach().cpu().numpy()
+        emb_rec = model(features, adj, adj_diffusion)[0].detach().cpu().numpy()
         adata.obsm['emb'] = emb_rec
             
         return adata
@@ -204,8 +202,7 @@ if __name__ == '__main__':
     autocast_ctx = torch.cuda.amp.autocast(dtype=torch.bfloat16) if use_amp else contextlib.nullcontext()
 
     # Data preprocessing
-    # data_root = './data/'
-    data_root = '/home/jiapan/DOMINO-m/data/MERFISH'
+    data_root = './data/'
     input_file = os.path.join(data_root, args.input_file)
 
     results_directory = './results/'
