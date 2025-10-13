@@ -4,10 +4,9 @@ __lib_name__ = "DOMINO"
 __lib_version__ = "0.1.0"
 __description__ = "Identifying distinct spatial domains from clear cell and endometrioid ovarian carcinoma using DOMINO"
 __url__ = "https://github.com/ABILiLab/DOMINO"
-__author__ = ""
-__author_email__ = ""
+__author__ = "Pan Jia, Wenjun Liu, Ning Liu, and Fuyi Li"
+__author_email__ = "jiapan@nwafu.edu.cn; nora.liu@adelaide.edu.au; ning.liu@adelaide.edu.au; fuyi.li@nwafu.edu.cn"
 __license__ = "MIT"
-# 
 __requires__ = []
 __long_description__ = open('README.md').read()
 
