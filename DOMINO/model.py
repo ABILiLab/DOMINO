@@ -118,7 +118,7 @@ class GDCGraphCL(Module):
     def decode(self, h, adj):
         return self.decoder(h, adj)
 
-    def forward(self, feat, feat_a, adj, gdc_adj):
+    def forward(self, feat, adj, gdc_adj):
         # Original view
         h = self.encode(feat, adj)
         # Diffusion-augmented view
