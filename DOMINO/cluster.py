@@ -65,16 +65,7 @@ def clustering(adata, radius=50, n_clusters=7, method='mclust', start=0.1, end=3
     pca = PCA(n_components=20, random_state=42) 
     embedding = pca.fit_transform(adata.obsm['emb'].copy())
     adata.obsm['emb_pca'] = embedding
-
-    import rpy2.robjects as robjects
-    try:
-        # 检查mclust包是否可加载
-        robjects.r('library(mclust)')
-        print("mclust包加载成功")
-    except Exception as e:
-        print(f"mclust包加载失败: {e}")
-
-        
+   
     if method == 'mclust':
        adata = mclust_R(adata, num_cluster = n_clusters, modelNames='EEE', used_obsm='emb_pca', random_seed=2020)
        adata.obs['domain'] = adata.obs['mclust']
@@ -126,18 +117,6 @@ def refine_label(adata, radius=50, key='label', row_block=4096):
         raise ValueError(f"spatial must be (n,>=2), got {position.shape}")
     position = np.ascontiguousarray(position[:, :2]) 
 
-    #try:
-    #    import ot.backend as otb
-    #    if hasattr(otb, "set_default_backend"):
-    #        otb.set_default_backend("numpy")
-    #except Exception:
-    #    pass
-    
-    #print("getting distances..")
-    #distance = ot.dist(position, position, metric='euclidean')
-    #print("finish geitting diantance..")
-    #n_cell = distance.shape[0]
-
     print("running optimal transport...")
     # use blockwise computation in optimal transport
     # calculating distances only for a subset of rows against 
@@ -152,15 +131,6 @@ def refine_label(adata, radius=50, key='label', row_block=4096):
     cats = pd.Categorical(old_type)
     codes = cats.codes   
     n_classes = len(cats.categories)
-
-    #for i in range(n_cell):
-    #    vec  = distance[i, :]
-    #    index = vec.argsort()
-    #    neigh_type = []
-    #    for j in range(1, n_neigh+1):
-    #        neigh_type.append(old_type[index[j]])
-    #    max_type = max(neigh_type, key=neigh_type.count)
-    #    new_type.append(max_type)
 
     for start in range(0, n_cell, row_block):
         stop = min(start + row_block, n_cell)
