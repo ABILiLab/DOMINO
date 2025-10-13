@@ -1,28 +1,17 @@
-# Implementation of functions: permutation, get_feature, add_contrastive_label and preprocess_adj_sparse is referencing from GraphST: https://doi.org/10.1038/s41467-023-36796-3
+# Implementation of functions: get_feature, add_contrastive_label and preprocess_adj_sparse is referencing from GraphST: https://doi.org/10.1038/s41467-023-36796-3
 
-import os
 import numpy as np
 import pandas as pd
 import scanpy as sc
 import torch
-import random
 import scipy.sparse as sp
 from scipy.sparse import csc_matrix
 from scipy.sparse import csr_matrix
 from sklearn.neighbors import NearestNeighbors 
 from scipy import sparse
 from scipy.sparse import eye, diags
-from scipy.sparse import lil_matrix, coo_matrix
+from scipy.sparse import coo_matrix
 
-def permutation(feature):
-    '''Randomly shuffles the rows of input feature matrix.'''
-    ids = np.arange(feature.shape[0])
-    # Randomly shuffle the indices.
-    ids = np.random.permutation(ids)
-    feature_permutated = feature[ids]
-    
-    return feature_permutated 
-    
 def _arnoldi_iteration(T, alpha, max_iter, tol, eps=1e-6):
     """Arnoldi iteration method for accelerating convergence."""
     N = T.shape[0]
@@ -251,11 +240,7 @@ def get_feature(adata):
     else:
        feat = adata_Vars.X[:, ] 
     
-    # Data augmentation by randomly shuffling the features.
-    feat_a = permutation(feat)
-    
     adata.obsm['feat'] = feat
-    adata.obsm['feat_a'] = feat_a    
     
 def add_contrastive_label(adata):
     '''Adds contrastive label to AnnData object.'''
