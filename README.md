@@ -2,8 +2,10 @@
 
 ## Environment installation 
 
-This code was tested with python 3.8, cuda 11.6, PyTorch 1.13.1, and torch_geometrics 2.5.3
+To facilitate user access to our DOMINO model, we provide the Python package: domino-spatial.
+Before using the domino-spatial package, you must install the required environment following the steps below.
 
+The package is developed based on the python 3.8, cuda 11.6, PyTorch 1.13.1, and torch_geometrics 2.5.3
 
 Install packages listed on a pip file:
 ```
@@ -35,11 +37,15 @@ Install `mclust` package:
 conda install -c conda-forge r-mclust
 ```
 
-## Run the code
+## Tutorial
 
-We have provided the test code test.py in the test directory.
+For the step-by-step tutorial, please refer to: https://domino-tutorials.readthedocs.io/en/latest/
 
-We expect the user to provide such as either 'adata.h5' or 'adata.h5ad' as the necessary input. And make sure to store this input file in the "./data" directory.
+## Run the test code
+
+Of course, if you wish to run the test.py file provided in the test directory, please still follow the Installation section of the tutorial to install the domino-spatial package, and then:
+
+We expect the user to provide such as 'adata.h5ad' as the necessary input. And make sure to store this input file in the "./data" directory.
 
 At the same time, we also hope that users can provide the number of spatial domain categories for the slices to be clustered, so as to facilitate the subsequent accurate spatial domain identification.
 
