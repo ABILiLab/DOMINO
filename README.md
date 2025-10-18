@@ -6,7 +6,7 @@
 
 DOMINO is built based on a self-supervised multi-view graph contrastive learning framework. It is designed to integrate spatial coordinates and gene expression information for robust identification of tissue domains from spatial transcriptomics data. DOMINO employs graph neural networks (GNNs) as base encoder, constructing a multi-view graph contrastive learning framework using the original graph and the diffusion graph to learn spot representations in the ST data. After representation learning, spatial clustering is performed using clustering tools such as mclust to assign spots to corresponding spatial domain.
 
-## Environment installation 
+## Requirements
 
 To facilitate user access to our DOMINO model, we provide the Python package: domino-spatial.
 Before using the domino-spatial package, you must install the required environment following the steps below.
