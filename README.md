@@ -1,6 +1,6 @@
 # Identifying distinct spatial domains from clear cell and endometrioid ovarian carcinoma using DOMINO
 
-![Model architecture of DOMINO](DOMINO-main/DOMINO.png)
+![Model architecture of DOMINO](./DOMINO.png)
 
 ## Overview
 
