@@ -5,14 +5,10 @@ import scanpy as sc
 import os
 import argparse
 import contextlib
-import sys
 
-domino_path = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'DOMINO'))
-sys.path.insert(0, domino_path)
-
-from preprocess import preprocess, preprocess_adj_sparse, get_feature, add_contrastive_label, grid_downsample, optimized_construct_interaction
-from model import GDCGraphCL
-from cluster import clustering
+from domino_spatial.preprocess import preprocess, preprocess_adj_sparse, get_feature, add_contrastive_label, grid_downsample, optimized_construct_interaction
+from domino_spatial.model import GDCGraphCL
+from domino_spatial.cluster import clustering
 
 import warnings
 warnings.filterwarnings('ignore')   
