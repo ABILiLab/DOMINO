@@ -6,6 +6,7 @@ import scanpy as sc
 import ot
 from sklearn.decomposition import PCA
 from sklearn.cluster import MiniBatchKMeans
+from sklearn.mixture import GaussianMixture
 import ot.backend as otb
 
 def mclust_R(adata, num_cluster, modelNames='EEE', used_obsm='emb_pca', random_seed=2020):
@@ -47,7 +48,7 @@ def clustering(adata, radius=50, n_clusters=7, method='mclust', start=0.1, end=3
     key : 
         The key of the learned representation in adata.obsm. The default is 'emb'.
     method : 
-        The tool for clustering. Supported tools include 'mclust', 'leiden', and 'louvain'. The default is 'mclust'. 
+        The tool for clustering. Supported tools include 'mclust', 'leiden', 'louvain', 'MiniBatchKMeans' and 'GaussianMixture'. The default is 'mclust'. 
     start : 
         The start value for searching. The default is 0.1.
     end : 
@@ -89,6 +90,14 @@ def clustering(adata, radius=50, n_clusters=7, method='mclust', start=0.1, end=3
             random_state=42
         )
         adata.obs['domain'] = kmeans.fit_predict(adata.obsm['emb_pca']).astype(str)
+    elif method =='gm':
+        emb = adata.obsm['emb_pca']
+        sub = np.ones(emb.shape[0], dtype=bool)
+        gm = GaussianMixture(n_components=n_clusters, covariance_type="tied",
+                     random_state=42, n_init=1, max_iter=50,
+                     reg_covar=1e-5, init_params="k-means++").fit(emb[sub])
+        lab = gm.predict(emb)
+        adata.obs['domain'] = pd.Categorical(lab)
 
     if refinement:  
        new_type = refine_label(adata, radius, key='domain')
